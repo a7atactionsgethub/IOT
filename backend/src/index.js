@@ -2,14 +2,20 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { init } = require("./db/database");
+const { auth } = require("./middleware/auth");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use("/api/readings", require("./routes/readings"));
-app.use("/api/patients", require("./routes/patients"));
-app.use("/api/alerts", require("./routes/alerts"));
+// Public route — no auth needed
+app.use("/api/auth", require("./routes/auth"));
+
+// Protected routes — need valid JWT
+app.use("/api/readings", auth, require("./routes/readings"));
+app.use("/api/patients", auth, require("./routes/patients"));
+app.use("/api/alerts", auth, require("./routes/alerts"));
+
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
 const PORT = process.env.PORT || 3001;

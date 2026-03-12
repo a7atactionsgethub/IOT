@@ -1,20 +1,16 @@
-// Auth middleware — stubbed for now
-// Later: validate JWT, check roles (doctor / patient / admin)
+const jwt = require("jsonwebtoken");
 
 function auth(req, res, next) {
-  // TODO: Add JWT verification here
-  // const token = req.headers.authorization?.split(" ")[1];
-  // if (!token) return res.status(401).json({ error: "Unauthorized" });
-  // const user = verifyToken(token);
-  // req.user = user;
-  next();
-}
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
 
-function requireRole(role) {
-  return (req, res, next) => {
-    // TODO: Check req.user.role === role
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET || "urosense-secret-key");
     next();
-  };
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
 }
 
-module.exports = { auth, requireRole };
+module.exports = { auth };
+

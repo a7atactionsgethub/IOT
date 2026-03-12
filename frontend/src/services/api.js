@@ -2,6 +2,28 @@ import axios from "axios";
 
 const api = axios.create({ baseURL: "/api" });
 
+// Attach token to every request
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem("token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// Redirect to login if token expired
+api.interceptors.response.use(
+  res => res,
+  err => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem("token");
+      window.location.reload();
+    }
+    return Promise.reject(err);
+  }
+);
+
+// Auth
+export const login = (data) => api.post("/auth/login", data).then(r => r.data);
+
 // Patients
 export const getPatients = () => api.get("/patients").then(r => r.data);
 export const getPatient = (id) => api.get(`/patients/${id}`).then(r => r.data);
