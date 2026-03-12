@@ -1,34 +1,30 @@
-// Alert thresholds — easy to extend per-patient later
+// Alert thresholds
 const THRESHOLDS = {
-  ph: { min: 4.5, max: 8.0 },
-  glucose: { max: 0.8 },           // mmol/L
-  protein_creatinine: { max: 30 }, // mg/g
-  nitrites: { value: 1 },          // 1 = positive (bad)
+  hydration_level: { min: 40, max: 100, unit: "%" },   // below 40% = dehydrated
+  sugar_level: { min: 0, max: 0.8, unit: "mmol/L" },   // above 0.8 = high glucose
 };
 
 function checkAlerts(reading) {
   const reasons = [];
 
-  if (reading.ph !== null && reading.ph !== undefined) {
-    if (reading.ph < THRESHOLDS.ph.min)
-      reasons.push(`pH too low (${reading.ph} < ${THRESHOLDS.ph.min})`);
-    if (reading.ph > THRESHOLDS.ph.max)
-      reasons.push(`pH too high (${reading.ph} > ${THRESHOLDS.ph.max})`);
+  if (reading.hydration_level !== null && reading.hydration_level !== undefined) {
+    if (reading.hydration_level < THRESHOLDS.hydration_level.min)
+      reasons.push(`Hydration low (${reading.hydration_level}% < ${THRESHOLDS.hydration_level.min}%)`);
   }
 
-  if (reading.glucose !== null && reading.glucose !== undefined) {
-    if (reading.glucose > THRESHOLDS.glucose.max)
-      reasons.push(`Glucose elevated (${reading.glucose} > ${THRESHOLDS.glucose.max} mmol/L)`);
+  if (reading.sugar_level !== null && reading.sugar_level !== undefined) {
+    if (reading.sugar_level > THRESHOLDS.sugar_level.max)
+      reasons.push(`Sugar level elevated (${reading.sugar_level} > ${THRESHOLDS.sugar_level.max} mmol/L)`);
   }
 
-  if (reading.protein_creatinine !== null && reading.protein_creatinine !== undefined) {
-    if (reading.protein_creatinine > THRESHOLDS.protein_creatinine.max)
-      reasons.push(`Protein/Creatinine elevated (${reading.protein_creatinine} > ${THRESHOLDS.protein_creatinine.max} mg/g)`);
-  }
+  if (reading.uti_indicator === 1 || reading.uti_indicator === true)
+    reasons.push("Urinary tract infection indicator positive");
 
-  if (reading.nitrites === 1 || reading.nitrites === true) {
-    reasons.push("Nitrites positive — possible bacterial infection");
-  }
+  if (reading.kidney_stone_indicator === 1 || reading.kidney_stone_indicator === true)
+    reasons.push("Kidney stone indicator positive");
+
+  if (reading.alcohol_presence === 1 || reading.alcohol_presence === true)
+    reasons.push("Alcohol presence detected");
 
   return {
     alert_triggered: reasons.length > 0 ? 1 : 0,

@@ -1,19 +1,33 @@
 import { useState, useEffect } from "react";
-import { getLatestReadings, getAlerts, login } from "./services/api";
+import axios from "axios";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
-const NORMAL = {
-  ph: { min: 4.5, max: 8.0 },
-  glucose: { min: 0, max: 0.8 },
-  protein_creatinine: { min: 0, max: 30 },
-};
+const api = axios.create({ baseURL: "/api" });
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem("token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+api.interceptors.response.use(res => res, err => {
+  if (err.response?.status === 401) { localStorage.clear(); window.location.reload(); }
+  return Promise.reject(err);
+});
 
-function isOff(key, val) {
+const MARKERS = [
+  { key: "hydration_level", label: "Hydration", unit: "%", numeric: true, min: 40, max: 100, good: "above 40%", icon: "💧" },
+  { key: "sugar_level", label: "Sugar Level", unit: "mmol/L", numeric: true, min: 0, max: 0.8, good: "below 0.8", icon: "🩸" },
+  { key: "uti_indicator", label: "UTI", binary: true, icon: "🦠" },
+  { key: "kidney_stone_indicator", label: "Kidney Stone", binary: true, icon: "🪨" },
+  { key: "alcohol_presence", label: "Alcohol", binary: true, icon: "🍺" },
+];
+
+function isAlert(marker, val) {
   if (val === null || val === undefined) return false;
-  const r = NORMAL[key];
-  if (!r) return false;
-  return (r.min !== undefined && val < r.min) || val > r.max;
+  if (marker.binary) return val === 1;
+  return val < (marker.min ?? 0) || val > marker.max;
 }
 
+// ── Login ──────────────────────────────────────────────
 function LoginPage({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -22,17 +36,17 @@ function LoginPage({ onLogin }) {
 
   const handleSubmit = async () => {
     if (!username || !password) return setError("Enter username and password");
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
-      const { token } = await login({ username, password });
-      localStorage.setItem("token", token);
-      onLogin();
-    } catch {
-      setError("Invalid username or password");
-    } finally {
-      setLoading(false);
-    }
+      const { data } = await api.post("/auth/login", { username, password });
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("role", data.role);
+      localStorage.setItem("username", data.username);
+      localStorage.setItem("patient_id", data.patient_id ?? "");
+      onLogin(data.role);
+    } catch (e) {
+      setError(e.response?.data?.error || "Invalid username or password");
+    } finally { setLoading(false); }
   };
 
   return (
@@ -40,38 +54,24 @@ function LoginPage({ onLogin }) {
       <div className="w-full max-w-sm border border-black/20 rounded p-8">
         <h1 className="font-bold text-xl tracking-tight mb-1">UROSENSE</h1>
         <p className="text-black/40 text-xs mb-8">IoT Urine Monitor</p>
-
         <div className="space-y-3">
           <div>
             <label className="text-xs text-black/50 block mb-1">Username</label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
+            <input type="text" value={username} onChange={e => setUsername(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()}
               className="w-full border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
-              placeholder="Enter username"
-            />
+              placeholder="Enter username" autoFocus />
           </div>
           <div>
             <label className="text-xs text-black/50 block mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()}
               className="w-full border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
-              placeholder="Enter password"
-            />
+              placeholder="Enter password" />
           </div>
-
           {error && <p className="text-red-600 text-xs">{error}</p>}
-
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="w-full bg-black text-white py-2 rounded text-sm font-medium hover:bg-black/80 transition-colors disabled:opacity-50"
-          >
+          <button onClick={handleSubmit} disabled={loading}
+            className="w-full bg-black text-white py-2 rounded text-sm font-medium hover:bg-black/80 transition-colors disabled:opacity-50">
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </div>
@@ -80,129 +80,278 @@ function LoginPage({ onLogin }) {
   );
 }
 
-function Dashboard() {
-  const [readings, setReadings] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [tab, setTab] = useState("live");
-  const [lastUpdated, setLastUpdated] = useState(null);
+// ── Marker Detail View ─────────────────────────────────
+function MarkerDetail({ marker, patientId, role }) {
+  const [history, setHistory] = useState([]);
+  const [latest, setLatest] = useState(null);
+  const [alertHistory, setAlertHistory] = useState([]);
 
   useEffect(() => {
-    async function load() {
-      const [r, a] = await Promise.all([getLatestReadings(), getAlerts({ limit: 20 })]);
-      setReadings(r);
-      setAlerts(a);
-      setLastUpdated(new Date().toLocaleTimeString());
-    }
+    const params = role !== "admin" ? {} : (patientId ? { patient_id: patientId } : {});
+    api.get(`/readings/marker/${marker.key}`, { params }).then(r => {
+      const data = r.data;
+      setHistory([...data].reverse());
+      setLatest(data[0] ?? null);
+      setAlertHistory(data.filter(d => d.alert_triggered));
+    });
+  }, [marker.key, patientId]);
+
+  const val = latest?.value;
+  const bad = isAlert(marker, val);
+
+  const chartData = history.map(h => ({
+    time: new Date(h.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    value: h.value,
+  }));
+
+  return (
+    <div className="space-y-6">
+      {/* Current status card */}
+      <div className={`border rounded p-6 ${bad ? "border-black" : "border-black/20"}`}>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-black/40 text-xs uppercase tracking-wider mb-1">{marker.label}</p>
+            {marker.binary ? (
+              <p className={`text-5xl font-bold ${bad ? "text-black" : "text-black/30"}`}>
+                {val === 1 ? "YES" : val === 0 ? "NO" : "—"}
+              </p>
+            ) : (
+              <p className={`text-5xl font-bold tabular-nums ${bad ? "text-black" : "text-black/70"}`}>
+                {val !== null && val !== undefined ? val : "—"}
+                <span className="text-xl ml-1 text-black/30">{marker.unit}</span>
+              </p>
+            )}
+            {latest && <p className="text-black/30 text-xs mt-2">{new Date(latest.timestamp).toLocaleString()}</p>}
+          </div>
+          <div className={`px-3 py-1 rounded border text-xs font-bold ${bad ? "border-black text-black" : "border-black/20 text-black/40"}`}>
+            {bad ? "⚠ ALERT" : "NORMAL"}
+          </div>
+        </div>
+        {!marker.binary && (
+          <div className="mt-4 text-xs text-black/30">
+            Normal range: {marker.good} {marker.unit}
+          </div>
+        )}
+      </div>
+
+      {/* Chart — numeric only */}
+      {marker.numeric && chartData.length > 1 && (
+        <div className="border border-black/20 rounded p-5">
+          <p className="text-xs font-semibold text-black/40 uppercase tracking-wider mb-4">History</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chartData}>
+              <XAxis dataKey="time" tick={{ fill: "#00000066", fontSize: 10 }} />
+              <YAxis tick={{ fill: "#00000066", fontSize: 10 }} />
+              <Tooltip contentStyle={{ background: "#fff", border: "1px solid #00000020", borderRadius: "6px", fontSize: "12px" }} />
+              <Line type="monotone" dataKey="value" stroke="#000" dot={false} strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Alert history */}
+      <div className="border border-black/20 rounded p-5">
+        <p className="text-xs font-semibold text-black/40 uppercase tracking-wider mb-3">Alert History</p>
+        {alertHistory.length === 0
+          ? <p className="text-black/20 text-sm">No alerts for this marker.</p>
+          : <div className="space-y-2">
+              {alertHistory.map(a => (
+                <div key={a.id} className="flex items-center justify-between py-2 border-b border-black/5 last:border-0">
+                  <p className="text-xs text-black/60">{a.alert_reasons}</p>
+                  <p className="text-xs text-black/30 ml-4 shrink-0">{new Date(a.timestamp).toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── Users Management ───────────────────────────────────
+function UsersPage() {
+  const [users, setUsers] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [form, setForm] = useState({ username: "", password: "", role: "user", patient_id: "" });
+  const [error, setError] = useState("");
+
+  const load = () => {
+    api.get("/auth/users").then(r => setUsers(r.data));
+    api.get("/patients").then(r => setPatients(r.data));
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleAdd = async () => {
+    if (!form.username || !form.password) return setError("Username and password required");
+    try {
+      await api.post("/auth/users", { ...form, patient_id: form.patient_id || null });
+      setForm({ username: "", password: "", role: "user", patient_id: "" });
+      setError(""); load();
+    } catch (e) { setError(e.response?.data?.error || "Failed to create user"); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Delete this user?")) return;
+    await api.delete(`/auth/users/${id}`); load();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="border border-black/20 rounded p-5 space-y-3">
+        <p className="text-xs font-semibold text-black/40 uppercase tracking-wider">Add New User</p>
+        <div className="grid grid-cols-2 gap-3">
+          <input className="border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
+            placeholder="Username" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
+          <input type="password" className="border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
+            placeholder="Password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+          <select className="border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
+            value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
+            <option value="user">User (Patient)</option>
+            <option value="admin">Admin</option>
+          </select>
+          <select className="border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
+            value={form.patient_id} onChange={e => setForm({ ...form, patient_id: e.target.value })}>
+            <option value="">No patient linked</option>
+            {patients.map(p => <option key={p.id} value={p.id}>{p.name} ({p.device_id})</option>)}
+          </select>
+        </div>
+        {error && <p className="text-red-600 text-xs">{error}</p>}
+        <button onClick={handleAdd}
+          className="bg-black text-white px-4 py-2 rounded text-sm font-medium hover:bg-black/80 transition-colors">
+          Add User
+        </button>
+      </div>
+      <div className="space-y-2">
+        {users.map(u => (
+          <div key={u.id} className="border border-black/20 rounded p-4 flex items-center justify-between">
+            <div>
+              <p className="font-medium text-sm">{u.username}</p>
+              <p className="text-black/40 text-xs">
+                {u.role} {u.patient_name ? `· linked to ${u.patient_name}` : "· no patient linked"}
+                · Added {new Date(u.created_at).toLocaleDateString()}
+              </p>
+            </div>
+            <button onClick={() => handleDelete(u.id)} className="text-xs text-black/30 hover:text-red-600 transition-colors">Delete</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────
+function Dashboard({ role }) {
+  const [activeTab, setActiveTab] = useState(MARKERS[0].key);
+  const [alerts, setAlerts] = useState([]);
+  const [latestReadings, setLatestReadings] = useState([]);
+  const username = localStorage.getItem("username");
+  const patientId = localStorage.getItem("patient_id");
+
+  useEffect(() => {
+    const load = () => {
+      api.get("/alerts?limit=50").then(r => setAlerts(r.data));
+      api.get("/readings/latest").then(r => setLatestReadings(r.data));
+    };
     load();
     const interval = setInterval(load, 8000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    window.location.reload();
-  };
+  const handleLogout = () => { localStorage.clear(); window.location.reload(); };
+
+  // Get latest value for each marker for sidebar badges
+  const latestReading = latestReadings[0];
+
+  const sidebarItems = [
+    ...MARKERS.map(m => ({
+      key: m.key, label: m.label, icon: m.icon,
+      alert: latestReading ? isAlert(m, latestReading[m.key]) : false,
+    })),
+    { key: "alerts", label: "Alerts", icon: "⚠", badge: alerts.length },
+    ...(role === "admin" ? [{ key: "users", label: "Users", icon: "👤" }] : []),
+  ];
+
+  const activeMarker = MARKERS.find(m => m.key === activeTab);
 
   return (
     <div className="min-h-screen bg-white text-black flex flex-col">
-      <header className="border-b border-black/20 px-6 py-4 flex items-center justify-between">
-        <div>
-          <span className="font-bold text-lg tracking-tight">UROSENSE</span>
-          <span className="ml-3 text-xs text-black/40">IoT Urine Monitor</span>
+      {/* Top bar */}
+      <header className="border-b border-black/20 px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="font-bold tracking-tight">UROSENSE</span>
+          <span className="text-black/20">|</span>
+          <span className="text-sm font-medium">{username}</span>
+          {role === "admin" && <span className="text-xs border border-black/20 px-2 py-0.5 rounded text-black/40">admin</span>}
         </div>
         <div className="flex items-center gap-4">
-          {lastUpdated && <span className="text-xs text-black/30">Updated {lastUpdated}</span>}
           <div className="w-2 h-2 rounded-full bg-black animate-pulse" />
-          <button onClick={handleLogout} className="text-xs text-black/40 hover:text-black transition-colors">
-            Sign out
-          </button>
+          <button onClick={handleLogout} className="text-xs text-black/40 hover:text-black transition-colors">Sign out</button>
         </div>
       </header>
 
-      <nav className="border-b border-black/20 px-6 flex gap-6">
-        <button
-          onClick={() => setTab("live")}
-          className={`py-3 text-sm font-medium border-b-2 transition-colors ${tab === "live" ? "border-black text-black" : "border-transparent text-black/40 hover:text-black/70"}`}
-        >
-          Live Readings
-        </button>
-        <button
-          onClick={() => setTab("alerts")}
-          className={`py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${tab === "alerts" ? "border-black text-black" : "border-transparent text-black/40 hover:text-black/70"}`}
-        >
-          Alerts
-          {alerts.length > 0 && (
-            <span className="bg-black text-white text-xs px-1.5 py-0.5 rounded font-bold">{alerts.length}</span>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <aside className="w-52 border-r border-black/10 flex flex-col py-4">
+          {sidebarItems.map(item => (
+            <button key={item.key} onClick={() => setActiveTab(item.key)}
+              className={`flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${activeTab === item.key ? "bg-black text-white" : "text-black/50 hover:text-black hover:bg-black/5"}`}>
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">{item.icon}</span>
+                <span>{item.label}</span>
+              </div>
+              {item.alert && activeTab !== item.key && <span className="w-1.5 h-1.5 rounded-full bg-black" />}
+              {item.badge > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded font-bold ${activeTab === item.key ? "bg-white text-black" : "bg-black text-white"}`}>
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </aside>
+
+        {/* Main content */}
+        <main className="flex-1 overflow-y-auto px-8 py-6">
+          <h2 className="font-semibold text-lg mb-6">
+            {activeMarker?.label ?? (activeTab === "alerts" ? "Alerts" : "Users")}
+          </h2>
+
+          {activeMarker && (
+            <MarkerDetail marker={activeMarker} patientId={patientId} role={role} />
           )}
-        </button>
-      </nav>
 
-      <main className="flex-1 px-6 py-6 max-w-4xl w-full mx-auto">
-        {tab === "live" && (
-          <div className="space-y-4">
-            {readings.length === 0 && <p className="text-black/30 text-sm">Waiting for device data...</p>}
-            {readings.map(r => (
-              <div key={r.id} className={`border rounded p-5 ${r.alert_triggered ? "border-black" : "border-black/20"}`}>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="font-semibold">{r.patient_name}</p>
-                    <p className="text-black/30 text-xs">{r.device_id} · {new Date(r.timestamp).toLocaleString()}</p>
+          {activeTab === "alerts" && (
+            <div className="space-y-3">
+              {alerts.length === 0 && <p className="text-black/30 text-sm">No alerts triggered.</p>}
+              {alerts.map(a => (
+                <div key={a.id} className="border border-black/20 rounded p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-sm">{a.patient_name}</span>
+                    <span className="text-black/30 text-xs">{new Date(a.timestamp).toLocaleString()}</span>
                   </div>
-                  {r.alert_triggered
-                    ? <span className="text-xs font-bold border border-black px-2 py-1 rounded">⚠ ALERT</span>
-                    : <span className="text-xs text-black/40 border border-black/20 px-2 py-1 rounded">NORMAL</span>
-                  }
+                  <p className="text-black/60 text-xs mb-2">{a.alert_reasons}</p>
+                  <div className="flex flex-wrap gap-3 text-xs text-black/30">
+                    <span>Hydration {a.hydration_level ?? "—"}%</span>
+                    <span>Sugar {a.sugar_level ?? "—"} mmol/L</span>
+                    <span>UTI {a.uti_indicator ? "YES" : "NO"}</span>
+                    <span>Kidney Stone {a.kidney_stone_indicator ? "YES" : "NO"}</span>
+                    <span>Alcohol {a.alcohol_presence ? "YES" : "NO"}</span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-4 gap-3">
-                  {[
-                    { key: "ph", label: "pH", val: r.ph },
-                    { key: "glucose", label: "Glucose", val: r.glucose, unit: "mmol/L" },
-                    { key: "protein_creatinine", label: "Protein / Creatinine", val: r.protein_creatinine, unit: "mg/g" },
-                    { key: "nitrites", label: "Nitrites", special: r.nitrites ? "POSITIVE" : "NEGATIVE", alert: !!r.nitrites },
-                  ].map(m => (
-                    <div key={m.key} className={`border rounded p-3 ${(m.special ? m.alert : isOff(m.key, m.val)) ? "border-black bg-black/5" : "border-black/10"}`}>
-                      <p className="text-black/40 text-xs mb-1">{m.label}</p>
-                      <p className={`text-xl font-bold tabular-nums ${(m.special ? m.alert : isOff(m.key, m.val)) ? "text-black" : "text-black/60"}`}>
-                        {m.special ?? (m.val !== null && m.val !== undefined ? `${m.val}` : "—")}
-                      </p>
-                      {m.unit && <p className="text-black/20 text-xs">{m.unit}</p>}
-                    </div>
-                  ))}
-                </div>
-                {r.alert_triggered && r.alert_reasons && (
-                  <p className="mt-3 text-xs text-black/50 border-t border-black/10 pt-3">⚠ {r.alert_reasons}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
 
-        {tab === "alerts" && (
-          <div className="space-y-3">
-            {alerts.length === 0 && <p className="text-black/30 text-sm">No alerts triggered.</p>}
-            {alerts.map(a => (
-              <div key={a.id} className="border border-black/20 rounded p-4">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-sm">{a.patient_name}</span>
-                  <span className="text-black/30 text-xs">{new Date(a.timestamp).toLocaleString()}</span>
-                </div>
-                <p className="text-black/60 text-xs mb-2">{a.alert_reasons}</p>
-                <div className="flex gap-4 text-xs text-black/30">
-                  <span>pH {a.ph ?? "—"}</span>
-                  <span>Glucose {a.glucose ?? "—"}</span>
-                  <span>P/C {a.protein_creatinine ?? "—"}</span>
-                  <span>Nitrites {a.nitrites ? "POS" : "NEG"}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
+          {activeTab === "users" && role === "admin" && <UsersPage />}
+        </main>
+      </div>
     </div>
   );
 }
 
 export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem("token"));
-  return authed ? <Dashboard /> : <LoginPage onLogin={() => setAuthed(true)} />;
+  const [role, setRole] = useState(localStorage.getItem("role"));
+  return authed
+    ? <Dashboard role={role} />
+    : <LoginPage onLogin={(r) => { setRole(r); setAuthed(true); }} />;
 }

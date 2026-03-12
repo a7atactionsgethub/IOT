@@ -1,6 +1,7 @@
 const initSqlJs = require("sql.js");
 const fs = require("fs");
 const path = require("path");
+const bcrypt = require("bcryptjs");
 require("dotenv").config();
 
 const DB_PATH = path.resolve(process.env.DB_PATH || "./src/db/iot.db");
@@ -56,23 +57,53 @@ async function init() {
     device_id TEXT UNIQUE NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
   db.run(`CREATE TABLE IF NOT EXISTS readings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id INTEGER NOT NULL, device_id TEXT NOT NULL,
-    ph REAL, glucose REAL, protein_creatinine REAL,
-    nitrites INTEGER DEFAULT 0, alert_triggered INTEGER DEFAULT 0,
-    alert_reasons TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    hydration_level REAL,
+    sugar_level REAL,
+    uti_indicator INTEGER DEFAULT 0,
+    kidney_stone_indicator INTEGER DEFAULT 0,
+    alcohol_presence INTEGER DEFAULT 0,
+    alert_triggered INTEGER DEFAULT 0,
+    alert_reasons TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (patient_id) REFERENCES patients(id)
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    patient_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES patients(id)
+  )`);
+
   persist();
 
-  const count = get("SELECT COUNT(*) as count FROM patients");
-  if (!count || count.count === 0) {
+  // Seed demo patient
+  const patientCount = get("SELECT COUNT(*) as count FROM patients");
+  if (!patientCount || patientCount.count === 0) {
     db.run("INSERT INTO patients (name, age, device_id) VALUES (?, ?, ?)", ["Demo Patient", 35, "DEVICE-001"]);
     persist();
+  }
+
+  // Seed admin user from .env if no users exist
+  const userCount = get("SELECT COUNT(*) as count FROM users");
+  if (!userCount || userCount.count === 0) {
+    const adminUsername = process.env.APP_USERNAME || "admin";
+    const adminPassword = process.env.APP_PASSWORD || "urosense123";
+    const hashed = bcrypt.hashSync(adminPassword, 10);
+    db.run("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", [adminUsername, hashed, "admin"]);
+    persist();
+    console.log(`✅ Admin user created: ${adminUsername}`);
   }
 
   console.log("✅ Database initialized");
 }
 
 module.exports = { init, run, get, all };
+
