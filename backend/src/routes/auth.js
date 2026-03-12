@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const db = require("../db/database");
 
-const SECRET = process.env.JWT_SECRET || "urosense-secret-key";
+const SECRET = process.env.JWT_SECRET || "smart-uri-secret-key";
 
 // POST /api/auth/login
 router.post("/login", (req, res) => {

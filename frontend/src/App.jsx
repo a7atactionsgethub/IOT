@@ -35,8 +35,12 @@ function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!username || !password) return setError("Enter username and password");
-    setLoading(true); setError("");
+    setError("");
+    if (!username || !password) {
+      setError("Please enter username and password");
+      return;
+    }
+    setLoading(true);
     try {
       const { data } = await api.post("/auth/login", { username, password });
       localStorage.setItem("token", data.token);
@@ -46,13 +50,15 @@ function LoginPage({ onLogin }) {
       onLogin(data.role);
     } catch (e) {
       setError(e.response?.data?.error || "Invalid username or password");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center">
       <div className="w-full max-w-sm border border-black/20 rounded p-8">
-        <h1 className="font-bold text-xl tracking-tight mb-1">UROSENSE</h1>
+        <h1 className="font-bold text-xl tracking-tight mb-1">Smart URI</h1>
         <p className="text-black/40 text-xs mb-8">IoT Urine Monitor</p>
         <div className="space-y-3">
           <div>
@@ -69,7 +75,13 @@ function LoginPage({ onLogin }) {
               className="w-full border border-black/20 rounded px-3 py-2 text-sm focus:outline-none focus:border-black"
               placeholder="Enter password" />
           </div>
-          {error && <p className="text-red-600 text-xs">{error}</p>}
+
+          {error && (
+            <div className="border border-black rounded px-3 py-2">
+              <p className="text-black text-xs font-medium">⚠ {error}</p>
+            </div>
+          )}
+
           <button onClick={handleSubmit} disabled={loading}
             className="w-full bg-black text-white py-2 rounded text-sm font-medium hover:bg-black/80 transition-colors disabled:opacity-50">
             {loading ? "Signing in..." : "Sign In"}
@@ -278,7 +290,7 @@ function Dashboard({ role }) {
       {/* Top bar */}
       <header className="border-b border-black/20 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="font-bold tracking-tight">UROSENSE</span>
+          <span className="font-bold tracking-tight">Smart URI</span>
           <span className="text-black/20">|</span>
           <span className="text-sm font-medium">{username}</span>
           {role === "admin" && <span className="text-xs border border-black/20 px-2 py-0.5 rounded text-black/40">admin</span>}
