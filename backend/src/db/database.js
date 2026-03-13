@@ -50,7 +50,19 @@ async function init() {
     db = new SQL.Database();
   }
 
-  // ── Readings table (references user_id instead of patient_id) ──
+  // ── Users table (now includes patient fields) ──
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    name TEXT,                -- patient's full name (if role=user)
+    age INTEGER,              -- patient's age
+    device_id TEXT UNIQUE,    -- device identifier (for readings)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // ── Readings table (references user_id) ──
   db.run(`CREATE TABLE IF NOT EXISTS readings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,

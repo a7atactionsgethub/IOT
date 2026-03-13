@@ -8,21 +8,57 @@ export default function Dashboard({ role, onLogout }) {
   const [activeTab, setActiveTab] = useState(MARKERS[0].key);
   const [alerts, setAlerts] = useState([]);
   const [latestReadings, setLatestReadings] = useState([]);
+  const [users, setUsers] = useState([]);               // all users (for admin dropdown)
+  const [selectedUserId, setSelectedUserId] = useState(null); // for admin selection
   const username = localStorage.getItem("username");
-  const userId = localStorage.getItem("user_id");
+  const currentUserId = localStorage.getItem("user_id");
 
+  // For non-admin, selected user is themselves
   useEffect(() => {
-    const load = () => {
-      api.get("/alerts?limit=50").then(r => setAlerts(r.data)).catch(() => {});
-      api.get("/readings/latest").then(r => setLatestReadings(r.data)).catch(() => {});
-    };
-    load();
-    const interval = setInterval(load, 8000);
+    if (role !== "admin") {
+      setSelectedUserId(currentUserId);
+    }
+  }, [role, currentUserId]);
+
+  // Fetch all users (for admin dropdown)
+  useEffect(() => {
+    if (role === "admin") {
+      api.get("/auth/users")
+        .then(r => {
+          setUsers(r.data);
+          // Optionally select the first patient by default
+          const firstPatient = r.data.find(u => u.role === "user");
+          if (firstPatient) setSelectedUserId(firstPatient.id);
+        })
+        .catch(() => {});
+    }
+  }, [role]);
+
+  // Fetch alerts (filter by selected user if any)
+  useEffect(() => {
+    const params = selectedUserId ? { user_id: selectedUserId, limit: 50 } : { limit: 50 };
+    api.get("/alerts", { params })
+      .then(r => setAlerts(r.data))
+      .catch(() => {});
+  }, [selectedUserId]);
+
+  // Fetch latest readings (for sidebar badges) – always global, or filtered? For badges we might want global or per user.
+  // Keeping global for simplicity (shows if any alert exists)
+  useEffect(() => {
+    api.get("/readings/latest")
+      .then(r => setLatestReadings(r.data))
+      .catch(() => {});
+    const interval = setInterval(() => {
+      api.get("/readings/latest")
+        .then(r => setLatestReadings(r.data))
+        .catch(() => {});
+    }, 8000);
     return () => clearInterval(interval);
   }, []);
 
   const latestReading = latestReadings[0];
 
+  // Prepare sidebar items (unchanged)
   const sidebarItems = [
     ...MARKERS.map(m => ({
       key: m.key,
@@ -36,18 +72,38 @@ export default function Dashboard({ role, onLogout }) {
 
   const activeMarker = MARKERS.find(m => m.key === activeTab);
 
+  // Handle user selection change
+  const handleUserChange = (e) => {
+    setSelectedUserId(e.target.value);
+  };
+
   return (
     <div className="min-h-screen text-gray-900 flex flex-col">
-      {/* Header – using refined clinical styling */}
+      {/* Header with user dropdown for admin */}
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-soft">
         <div className="flex items-center gap-3">
           <span className="font-bold text-xl tracking-tight text-blue-600">UROSENSE</span>
           <span className="text-gray-300">|</span>
           <span className="text-sm font-medium text-gray-700">{username}</span>
           {role === "admin" && (
-            <span className="text-xs bg-clinical-light text-clinical border border-clinical rounded px-2 py-0.5">
-              admin
-            </span>
+            <>
+              <span className="text-xs bg-clinical-light text-clinical border border-clinical rounded px-2 py-0.5">
+                admin
+              </span>
+              {/* User dropdown */}
+              <select
+                value={selectedUserId || ""}
+                onChange={handleUserChange}
+                className="ml-4 text-sm border border-gray-300 rounded px-2 py-1 bg-white"
+              >
+                <option value="" disabled>Select a patient</option>
+                {users.filter(u => u.role === "user").map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name || u.username} {u.device_id ? `(${u.device_id})` : ''}
+                  </option>
+                ))}
+              </select>
+            </>
           )}
         </div>
         <div className="flex items-center gap-4">
@@ -96,14 +152,18 @@ export default function Dashboard({ role, onLogout }) {
             {activeMarker?.label ?? (activeTab === "alerts" ? "Alerts" : "Users")}
           </h2>
 
-          {activeMarker && (
-            <MarkerDetail marker={activeMarker} userId={userId} role={role} />
+          {/* Show marker details only if a user is selected */}
+          {activeMarker && selectedUserId && (
+            <MarkerDetail marker={activeMarker} userId={selectedUserId} role={role} />
+          )}
+          {activeMarker && !selectedUserId && role === "admin" && (
+            <p className="text-gray-500">Please select a patient from the dropdown.</p>
           )}
 
           {activeTab === "alerts" && (
             <div className="space-y-3">
               {alerts.length === 0 && (
-                <p className="text-gray-500 text-sm">No alerts triggered.</p>
+                <p className="text-gray-500 text-sm">No alerts triggered for this user.</p>
               )}
               {alerts.map(a => (
                 <div key={a.id} className="medical-card p-4">
