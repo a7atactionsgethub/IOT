@@ -2,12 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #ffffff;
-  color: #000000;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+/* ── Professional Medical Theme ───────────────── */
+
+@layer base {
+  /* Modern, highly readable font stack */
+  html {
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-white text-gray-900;
+    background-color: #f8fafc;  /* Very light clinical blue-gray */
+  }
+
+  /* Improve focus outlines for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+  }
 }
 
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: #ffffff; }
-::-webkit-scrollbar-thumb { background: #444; }
+/* ── Custom component styles ──────────────────── */
+@layer components {
+  /* Card style for readings, users, alerts */
+  .medical-card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 
+           hover:shadow-md transition-shadow duration-200;
+  }
+
+  /* Status indicators */
+  .status-normal {
+    @apply bg-emerald-50 text-emerald-700 border border-emerald-200;
+  }
+  .status-alert {
+    @apply bg-rose-50 text-rose-700 border border-rose-200 font-medium;
+  }
+
+  /* Sidebar navigation */
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg 
+           transition-all duration-150;
+  }
+  .nav-item-active {
+    @apply bg-blue-600 text-white shadow-sm;
+  }
+  .nav-item-inactive {
+    @apply text-gray-600 hover:bg-blue-50 hover:text-blue-700;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium 
+           px-4 py-2 rounded-lg transition-colors shadow-sm 
+           focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+  }
+  .btn-outline {
+    @apply border border-gray-300 hover:border-gray-400 
+           bg-white hover:bg-gray-50 text-gray-700 font-medium 
+           px-4 py-2 rounded-lg transition-colors;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply w-full border border-gray-200 rounded-lg px-3 py-2 
+           text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 
+           outline-none transition-shadow;
+  }
+
+  /* Table/List rows */
+  .list-row {
+    @apply border-b border-gray-100 last:border-0 py-3 
+           hover:bg-gray-50/50 transition-colors;
+  }
+}
+
+/* ── Custom utilities ─────────────────────────── */
+@layer utilities {
+  /* Clinical blue accents */
+  .text-clinical {
+    color: #0f5b8c;
+  }
+  .bg-clinical-light {
+    background-color: #e6f0f9;
+  }
+  .border-clinical {
+    border-color: #b8d1e6;
+  }
+
+  /* Soft shadows */
+  .shadow-soft {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  .shadow-soft-lg {
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.02);
+  }
+}
+
+/* ── Scrollbar styling (refined) ─────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Firefox scrollbar (optional) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}

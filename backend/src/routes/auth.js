@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
 const db = require("../db/database");
 
 const SECRET = process.env.JWT_SECRET || "urosense-secret-key";
@@ -14,23 +13,34 @@ router.post("/login", (req, res) => {
   const user = db.get("SELECT * FROM users WHERE username = ?", [username]);
   if (!user) return res.status(401).json({ error: "Invalid username or password" });
 
-  const valid = bcrypt.compareSync(password, user.password);
-  if (!valid) return res.status(401).json({ error: "Invalid username or password" });
+  // Plain text comparison (no bcrypt)
+  if (password !== user.password) {
+    return res.status(401).json({ error: "Invalid username or password" });
+  }
 
   const token = jwt.sign(
-    { id: user.id, username: user.username, role: user.role, patient_id: user.patient_id },
-    SECRET, { expiresIn: "12h" }
+    { id: user.id, username: user.username, role: user.role }, // no patient_id anymore
+    SECRET,
+    { expiresIn: "12h" }
   );
-  res.json({ token, username: user.username, role: user.role, patient_id: user.patient_id });
+  // Return user_id (id) for frontend to use in API calls
+  res.json({
+    token,
+    username: user.username,
+    role: user.role,
+    user_id: user.id
+  });
 });
 
 // GET /api/auth/users — admin only
 router.get("/users", require("../middleware/auth").auth, (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+  // Now users table contains all fields: id, username, role, name, age, device_id, created_at
   const users = db.all(`
-    SELECT u.id, u.username, u.role, u.patient_id, u.created_at, p.name as patient_name
-    FROM users u LEFT JOIN patients p ON u.patient_id = p.id
-    ORDER BY u.created_at DESC
+    SELECT id, username, role, name, age, device_id, created_at
+    FROM users
+    ORDER BY created_at DESC
   `);
   res.json(users);
 });
@@ -39,18 +49,26 @@ router.get("/users", require("../middleware/auth").auth, (req, res) => {
 router.post("/users", require("../middleware/auth").auth, (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
 
-  const { username, password, role = "user", patient_id = null } = req.body;
+  const { username, password, role = "user", name, age, device_id } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username and password required" });
 
   const existing = db.get("SELECT id FROM users WHERE username = ?", [username]);
   if (existing) return res.status(400).json({ error: "Username already exists" });
 
-  const hashed = bcrypt.hashSync(password, 10);
+  // Store password in plain text
   const result = db.run(
-    "INSERT INTO users (username, password, role, patient_id) VALUES (?, ?, ?, ?)",
-    [username, hashed, role, patient_id]
+    `INSERT INTO users (username, password, role, name, age, device_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [username, password, role, name || null, age || null, device_id || null]
   );
-  res.json({ id: result.lastInsertRowid, username, role, patient_id });
+  res.json({
+    id: result.lastInsertRowid,
+    username,
+    role,
+    name,
+    age,
+    device_id
+  });
 });
 
 // DELETE /api/auth/users/:id — admin only
